@@ -15,8 +15,7 @@ import shutil
 _entry_size = 30
 _target_picture_size = 1000
 ui_root = None
-
-
+# test
 # TODO: Test functionality when registering multiple check in a row, CekuWeb.register _check function
 # Date field always has different name  - use regex when searching
 # Phone number is left in cells
