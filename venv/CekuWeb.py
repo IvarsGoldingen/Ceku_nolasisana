@@ -100,6 +100,9 @@ class CekuWeb:
         check_sum_input_el = self.driver.find_element_by_name("amount")
         check_sum_input_el.send_keys(check.summa)
         phone_input_el = self.driver.find_element_by_name("phone")
+        # Clear because this is saved from previous session
+        phone_input_el.send_keys(Keys.CONTROL, "a")
+        phone_input_el.send_keys(Keys.DELETE)
         phone_input_el.send_keys(phone_number)
         self.input_date(check.datums)
         
@@ -118,9 +121,28 @@ class CekuWeb:
         else:
             print("Did not find splitting char")
         # MuiPickersSlideTransition-transitionContainer MuiPickersCalendarHeader-transitionContainer
-        date_field = self.driver.find_element_by_xpath(
-            "//div[@class='MuiInputBase-root MuiOutlinedInput-root jss36 jss40 MuiInputBase-fullWidth "
-            "MuiInputBase-formControl MuiInputBase-adornedEnd MuiOutlinedInput-adornedEnd']")
+        # TODO: this cahnges its name
+        acceptable_el_names = ["//div[@class='MuiInputBase-root MuiOutlinedInput-root jss36 jss40 MuiInputBase-fullWidth "
+                "MuiInputBase-formControl MuiInputBase-adornedEnd MuiOutlinedInput-adornedEnd']",
+                               "//div[@class='MuiInputBase-root MuiOutlinedInput-root jss107 jss111 MuiInputBase-fullWidth "
+                "MuiInputBase-formControl MuiInputBase-adornedEnd MuiOutlinedInput-adornedEnd']",
+                               "//div[@class='MuiInputBase-root MuiOutlinedInput-root jss172 jss176 MuiInputBase-fullWidth "
+                "MuiInputBase-formControl MuiInputBase-adornedEnd MuiOutlinedInput-adornedEnd']",
+                               "//div[@class='MuiInputBase-root MuiOutlinedInput-root jss303 jss307 MuiInputBase-fullWidth "
+                "MuiInputBase-formControl MuiInputBase-adornedEnd MuiOutlinedInput-adornedEnd']"]
+        found_date_field = False
+        cntr = 0
+        while not found_date_field:
+            try:
+                # date_field = self.driver.find_element_by_xpath(
+                #     "//div[@class='MuiInputBase-root MuiOutlinedInput-root jss36 jss40 MuiInputBase-fullWidth "
+                #     "MuiInputBase-formControl MuiInputBase-adornedEnd MuiOutlinedInput-adornedEnd']")
+                date_field = self.driver.find_element_by_xpath(acceptable_el_names[cntr])
+                found_date_field = True
+            except selenium.common.exceptions.NoSuchElementException as e:
+                cntr+=1
+                if cntr >= len(acceptable_el_names):
+                    found_date_field = True
         date_field.click()
         self.driver.implicitly_wait(1)
         # Get the name of the month. Written like this "Novembris 2021"

@@ -10,19 +10,20 @@ import glob, os
 from Settings import Settings
 from datetime import date
 from os.path import exists
+from ScrollFrame import ScrollFrame
 import shutil
 
 _entry_size = 30
 _target_picture_size = 1000
-ui_root = None
 # test
+# TODO: ? Create logic that checks if found store data resembles expected - minimum length maybe
+# implement minimal lenth in function find_in_txt_after_space of ImageDecoder
+# TODO: Improve performance - why is it so long to after pressing start, setting picture on ui in thread?
 # TODO: Test functionality when registering multiple check in a row, CekuWeb.register _check function
-# Date field always has different name  - use regex when searching
-# Phone number is left in cells
-# TODO: Add zoom, and pan for picture https://www.youtube.com/watch?v=1v9az4LMDLU
+# Date field always has different name  - use regex when searching?
 # TODO: ? Add rotate buttons  -so far everything opened fine
 # TODO: ? Radio buttons for store names
-# TODO: ? Create logic that checks if found store data resembles expected
+
 
 def main_fc():
     main = MainClass()
@@ -33,15 +34,16 @@ class MainClass:
     _entry_size = 30
     _directory_entry_size = 100
     _target_picture_size = 1000
-    _image_row = 2
+    _image_row = 3
     _image_clmn = 3
     _imaga_span = 100
+    # precentage to zoom on each button press
+    _zoom_coef = 0.33
     # How often does the UI process check if new check has been processed in another process
     _check_processing_dreq_ms = 500
 
     def __init__(self):
         """
-        @type self.check: Ceks
         @type self.web: CekuWeb
         """
         # Queue to get data from image process
@@ -53,11 +55,13 @@ class MainClass:
         self.check_image_list = []
         # Indicates whihc picture in the check_image_list is displayed in the ui
         self.current_check_displayed = -999
-        self.check = None
+        self.check_to_register = Ceks()
         # If true dos not allow switching between checks
         self.processing_check_data = False
         # List of actual check objects
         self.check_list = []
+        # Adjusted by pressing zoom buttons
+        self.displayed_img_size_coef = 1.0
         self.image = None
         # CekuWeb object for interracting with web page
         self.web = None
@@ -79,16 +83,23 @@ class MainClass:
         image = Image.open(image_location)
         old_width, old_height = image.size
         biggest_size = old_width if old_width >= old_height else old_height
-        size_coeficient = self._target_picture_size / biggest_size
+        target_size = int(self._target_picture_size * self.displayed_img_size_coef)
+        size_coeficient = target_size / biggest_size
         new_size = (int(old_width * size_coeficient), int(old_height * size_coeficient))
-        # new_size = (int(old_height * size_coeficient), int(old_width * size_coeficient))
+        print(f'Desired size {new_size[0]} and {new_size[1]}')
         image = image.resize(new_size)
         if old_width > old_height:
             image = image.rotate(270, resample=Image.BICUBIC, expand=True)
         self.image = ImageTk.PhotoImage(image)
-        self.img_lbl = Label(image=self.image)
-        self.img_lbl.grid(row=self._image_row, column=self._image_clmn, columnspan=self._imaga_span,
-                          rowspan=self._imaga_span)
+        self.img_lbl.configure(image=self.image)
+
+    def zoom_in(self):
+        self.displayed_img_size_coef += self._zoom_coef
+        self.set_picture(self.check_list[self.current_check_displayed].file_name)
+
+    def zoom_out(self):
+        self.displayed_img_size_coef -= self._zoom_coef
+        self.set_picture(self.check_list[self.current_check_displayed].file_name)
 
     def prepare_ui_elements(self):
         # Labels
@@ -101,7 +112,7 @@ class MainClass:
         self.lbl_summa = Label(self.ui_root, text="Summa:")
         self.lbl_datums = Label(self.ui_root, text="Datums:")
         self.lbl_directory = Label(self.ui_root, text="Čeku mape:")
-        self.img_lbl = Label(self.ui_root, text="Čeka bilde")
+
         self.picture_opened_statuss = Label(self.ui_root, text="Spied LASĪT ČEKUS, lai sāktu")
         self.phone_nr_label = Label(self.ui_root, text="Telefona numurs reģistrācijai:")
         self.entry_ceka_nr_var = tkinter.StringVar()
@@ -142,13 +153,26 @@ class MainClass:
         self.btn_settings = Button(self.ui_root, text='IESTATĪJUMI', command=self.btn_settings_pressed)
         self.btn_save_and_finish = Button(self.ui_root, text='BEIGT', command=self.save_and_finish,
                                           padx=10, pady=8, width=15)
+        self.zoom_btn_frame = Frame(self.ui_root)
+        self.btn_zoom_out = Button(self.zoom_btn_frame, text='-', command=self.zoom_out,
+                                          padx=5, pady=2, width=15, font=("Courier", 20))
+        self.btn_zoom_in = Button(self.zoom_btn_frame, text='+', command=self.zoom_in,
+                                  padx=5, pady=2, width=15, font=("Courier", 20))
         # phone selection radio buttons
-        self.r_btn_phone_1 = Radiobutton(ui_root, text="", variable=self.r_btn_phone_var, value=1,
+        self.r_btn_phone_1 = Radiobutton(self.ui_root, text="", variable=self.r_btn_phone_var, value=1,
                                          command=lambda: self.r_btn_clicked(self.r_btn_phone_var.get()))
-        self.r_btn_phone_2 = Radiobutton(ui_root, text="", variable=self.r_btn_phone_var, value=2,
+        self.r_btn_phone_2 = Radiobutton(self.ui_root, text="", variable=self.r_btn_phone_var, value=2,
                                          command=lambda: self.r_btn_clicked(self.r_btn_phone_var.get()))
-        self.r_btn_phone_3 = Radiobutton(ui_root, text="", variable=self.r_btn_phone_var, value=3,
+        self.r_btn_phone_3 = Radiobutton(self.ui_root, text="", variable=self.r_btn_phone_var, value=3,
                                          command=lambda: self.r_btn_clicked(self.r_btn_phone_var.get()))
+        #Scrollable pict
+        self.main_img_frame = Frame(self.ui_root, height=800)
+        # Do not allow tkinter to shrink this because pictures will be added later
+        self.main_img_frame.pack_propagate(0)
+        self.scrollable_frame = ScrollFrame(self.main_img_frame)
+        self.img_lbl = Label(self.scrollable_frame.viewPort, text="Čeka bilde", anchor=tkinter.CENTER)
+
+
 
     def place_ui_elements(self):
         ceka_dati_start_row = 3
@@ -188,8 +212,13 @@ class MainClass:
         self.dir_btn.grid(row=0, column=5)
         self.btn_settings.grid(row=0, column=6)
         self.status_lbl.grid(row=1, column=3, columnspan=3)
-        self.img_lbl.grid(row=self._image_row, column=self._image_clmn, columnspan=self._imaga_span,
-                          rowspan=self._imaga_span)
+        self.img_lbl.pack(side="top", fill="both", expand=True)
+        self.scrollable_frame.pack(side="top", fill="both", expand=True)
+        self.zoom_btn_frame.grid(row=2, column=3, columnspan=3)
+        self.btn_zoom_out.grid(row=0, column=0)
+        self.btn_zoom_in.grid(row=0, column=1)
+        self.main_img_frame.grid(row=self._image_row, column=self._image_clmn, columnspan=self._imaga_span,
+                                 rowspan=self._imaga_span, sticky=tkinter.W+tkinter.E+tkinter.N)
         self.entry_phone_1_var.set(self.setting.N1)
         self.entry_phone_2_var.set(self.setting.N2)
         self.entry_phone_3_var.set(self.setting.N3)
@@ -227,7 +256,7 @@ class MainClass:
         if self.web == None:
             print("self.web object does not exist, creating")
             self.web = CekuWeb()
-        self.web.register_check(self.check, phone_nr)
+        self.web.register_check(self.check_to_register, phone_nr)
 
     """
     Before opening web, read input fields with any changes that the user might have done
@@ -236,12 +265,13 @@ class MainClass:
 
     def get_data_from_in_fields(self):
         try:
-            self.check.ceka_nr = self.entry_ceka_nr_var.get()
-            self.check.sasijas_nr = self.entry_sasijas_nr_var.get()
-            self.check.pvn_nr = self.entry_pvn_nr_var.get()
-            self.check.summa = self.entry_summa_var.get()
-            self.check.datums = self.entry_date_var.get()
+            self.check_to_register.ceka_nr = self.entry_ceka_nr_var.get()
+            self.check_to_register.sasijas_nr = self.entry_sasijas_nr_var.get()
+            self.check_to_register.pvn_nr = self.entry_pvn_nr_var.get()
+            self.check_to_register.summa = self.entry_summa_var.get()
+            self.check_to_register.datums = self.entry_date_var.get()
         except Exception as e:
+            print(e)
             self.show_message('Nav aizpildīti visi lauki')
 
     def get_phone_nr_from_radio_btns(self):
@@ -257,6 +287,7 @@ class MainClass:
 
     # Start by checking image files in the selected folder
     def btn_start_pressed(self):
+        self.displayed_img_size_coef = 1.0
         if not self.processing_check_data:
             self.set_statuss('Meklē čekus mapē', "Green")
             self.processing_check_data = True
@@ -305,6 +336,7 @@ class MainClass:
                 if self.checks_processed == 1:
                     # if first check set it on UI
                     self.place_check_data(processed_check)
+                    self.check_to_register = processed_check
                     self.set_picture(processed_check.file_name)
                     status_text = "Rāda " + str(self.current_check_displayed + 1) + " no " + str(
                         len(self.check_image_list))
@@ -319,6 +351,7 @@ class MainClass:
 
     # Open next check in UI
     def btn_next_pressed(self):
+        self.displayed_img_size_coef = 1.0
         if not self.processing_check_data:
             self.current_check_displayed += 1
             if self.current_check_displayed >= len(self.check_image_list):
@@ -329,6 +362,7 @@ class MainClass:
 
     # Open previous check in UI
     def btn_prev_pressed(self):
+        self.displayed_img_size_coef = 1.0
         if not self.processing_check_data:
             self.current_check_displayed -= 1
             if self.current_check_displayed < 0:

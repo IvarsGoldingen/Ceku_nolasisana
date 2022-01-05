@@ -16,7 +16,7 @@ test
 class ImageDecoderProcess(Process):
     _resize_factor = 0.5
     text = ""
-    debug_print_enable = False
+    debug_print_enable = True
     # List of stores first being name second PVN code
     _store_list = [("MAXIMA", "LV40003520643"),
                    ("RIMI", "LV40003053029"),
@@ -27,7 +27,7 @@ class ImageDecoderProcess(Process):
     _UNKNOWN_NR = 100
     # List of tupples for searching different data in different stores
     # First is String to search for, next is allowable faults
-    _SASIJAS_KEYWORDS = [('Šas. Nr.', 2),
+    _SASIJAS_KEYWORDS = [('Šas. Nr.', 1),
                          ('Šasijas numurs:', 7),
                          ('Šasijas numurs:', 7),
                          ('S/N:', 1)]
@@ -39,7 +39,8 @@ class ImageDecoderProcess(Process):
     _PVN_NR_KEYWORDS = [('PVN maksātāja kods', 8),
                         ('PVN maksātāja kods', 8),
                         ('PVN maksātāja kods', 8),
-                        ('PVN Nr.', 8)]
+                        ('PVN Nr.', 8),
+                        ('PVN ', 1)]
     _SUM_KEYWORDS = [('KOPĀ', 1),
                      ('Samaksai EUR', 1),
                      ('Summa:', 1),
@@ -133,22 +134,46 @@ class ImageDecoderProcess(Process):
             return "Nezināms"
 
     # search for text which is after search string seperated by spaces
-    def find_in_txt_after_space(self, search_string, nr_of_faults_allowed):
+    def find_in_txt_after_space(self, search_string, nr_of_faults_allowed, min_expected_length=-1):
         search_crit = re.compile('(%s){e<=%s}' % (search_string, str(nr_of_faults_allowed)))
-        match_obj = re.search(search_crit, self.text)
-        if match_obj != None:
-            # get the string where the checkue number starts
-            ceka_nr_str = self.text[match_obj.end():]
-            # Get string 2 full words with space between them
-            search_crit = re.compile("^\S*\s+(\S+)")
-            match_obj = re.search(search_crit, ceka_nr_str)
-            ceka_nr_string = match_obj.group(0)
-            # Split string with whitespaces
-            list_of_strings = re.split("\\s+", ceka_nr_string)
-            # The second string in the list should containt the needed info
-            return list_of_strings[1]
-        else:
-            self.debug_print("Did not find \"%s\" in check String" % search_string)
+        result_found = False
+        while not result_found:
+            match_obj = re.search(search_crit, self.text)
+            if match_obj != None:
+                # get the string where the searched data starts
+                data_plus_extra = self.text[match_obj.end():]
+                if data_plus_extra[0] == ' ':
+                    # There is a space after the search keyword
+                    # Get string 2 full words with space between them, removing starting space
+                    search_crit_2w = re.compile("^\S*\s+(\S+)")
+                    match_obj = re.search(search_crit_2w, data_plus_extra)
+                    found_data = match_obj.group(0)
+                    # Split string with whitespaces
+                    list_of_strings = re.split("\\s+", found_data)
+                    return list_of_strings[1]
+                else:
+                    # There is no space after the search word, so no need to search for next word after space
+                    # Get text until first space
+                    data_list = re.split("\\s+", data_plus_extra, maxsplit=1)
+                    return data_list[0]
+                # self.debug_print("***Printing all matches for data***")
+                # for match_obj_2 in re.finditer(search_crit, self.text):
+                #     data_plus_extra2 = self.text[match_obj_2.end():]
+                #     if data_plus_extra2[0] == ' ':
+                #         self.debug_print("There is a space after the search keyword")
+                #         search_crit_2w2 = re.compile("^\S*\s+(\S+)")
+                #         match_obj_3 = re.search(search_crit_2w2, data_plus_extra2)
+                #         if match_obj_3 != None:
+                #             data = match_obj_3.group(0)
+                #             data_list = re.split("\\s+", data)
+                #             self.debug_print(data_list[1])
+                #     else:
+                #         self.debug_print("NO space after the search keyword")
+                #         data_list = re.split("\\s+", data_plus_extra2, maxsplit=1)
+                #         self.debug_print(data_list[0])
+                # self.debug_print("************************************")
+            else:
+                self.debug_print("Did not find \"%s\" in check String" % search_string)
 
     def search_for_pattern(self, pattern_string, nr_of_faults_allowed):
         search_crit = re.compile('(%s){e<=%s}' % (pattern_string, str(nr_of_faults_allowed)))
@@ -173,6 +198,9 @@ class ImageDecoderProcess(Process):
         else:
             return False
 
+    """
+    Returns store number if it isrecognised by the app, else returns unknown constant
+    """
     def determine_store(self):
         self.debug_print("Determening store")
         for nr, item in enumerate(self._store_list):
