@@ -15,6 +15,7 @@ test
 """
 class ImageDecoderProcess(Process):
     _resize_factor = 0.5
+    _LENGTH_CHECK_DISABLED = -1
     text = ""
     debug_print_enable = True
     # List of stores first being name second PVN code
@@ -26,27 +27,30 @@ class ImageDecoderProcess(Process):
     _TOPS_NR = 2
     _UNKNOWN_NR = 100
     # List of tupples for searching different data in different stores
-    # First is String to search for, next is allowable faults
-    _SASIJAS_KEYWORDS = [('Šas. Nr.', 1),
-                         ('Šasijas numurs:', 7),
-                         ('Šasijas numurs:', 7),
-                         ('S/N:', 1)]
-    _CEKA_NR_KEYWORDS = [('Čeks', 1),
-                         ('Dok\. Nr', 2),
-                         ('Dok\. Nr', 2),
-                         ('KVĪTS Nr.', 2),
-                         ('Dokuments',2)]
-    _PVN_NR_KEYWORDS = [('PVN maksātāja kods', 8),
-                        ('PVN maksātāja kods', 8),
-                        ('PVN maksātāja kods', 8),
-                        ('PVN Nr.', 8),
-                        ('PVN ', 1)]
-    _SUM_KEYWORDS = [('KOPĀ', 1),
-                     ('Samaksai EUR', 1),
-                     ('Summa:', 1),
-                     ('Kopā apmaksai', 5),
-                     ('KARTE', 1),
-                     ('KOPĀ EUR', 1)]
+    # 1 = String to search for
+    # 2 = next is allowable faults
+    # 3 = expected min length
+    _SASIJAS_KEYWORDS = [('Šas. Nr.', 1, 4),
+                         ('Šasijas numurs:', 7, 4),
+                         ('Šasijas numurs:', 7, 4),
+                         ('S/N:', 1, 4)]
+    _CEKA_NR_KEYWORDS = [('Čeks', 1, 4),
+                         ('Dok\. Nr', 2, 4),
+                         ('Dok\. Nr', 2, 4),
+                         ('KVĪTS Nr.', 2, 4),
+                         ('Dokuments',2, 4)]
+    _PVN_NR_KEYWORDS = [('PVN maksātāja kods', 8, 10),
+                        ('PVN maksātāja kods', 8, 10),
+                        ('PVN maksātāja kods', 8, 10),
+                        ('PVN Nr.', 1, 10),
+                        ('PVN ', 1, 10)]
+    _SUM_KEYWORDS = [('KOPĀ', 1, 3),
+                     ('Samaksai EUR', 1, 3),
+                     ('Summa:', 1, 3),
+                     ('Kopā apmaksai', 5, 3),
+                     ('KARTE', 1, 3),
+                     ('KOPĀ EUR', 1, 3),
+                     ('SAMAKSA', 1, 3)]
 
     def __init__(self, queue, image_location, image_name):
         Process.__init__(self)
@@ -112,7 +116,8 @@ class ImageDecoderProcess(Process):
                              keyword_list[veikals_nr][0])
             # Known store, search only specific string
             result = self.find_in_txt_after_space(keyword_list[veikals_nr][0],
-                                                  keyword_list[veikals_nr][1])
+                                                  keyword_list[veikals_nr][1],
+                                                  keyword_list[veikals_nr][2])
             self.debug_print(result)
         if result == None:
             self.debug_print("Did not find data by specific keyword")
@@ -124,7 +129,8 @@ class ImageDecoderProcess(Process):
                     # Do not check the keyword already used with known store
                     self.debug_print("Using: " + search_word_tpl[0])
                     result = self.find_in_txt_after_space(search_word_tpl[0],
-                                                          search_word_tpl[1])
+                                                          search_word_tpl[1],
+                                                          search_word_tpl[2])
                     if result != None:
                         break
         if result != None:
@@ -134,28 +140,39 @@ class ImageDecoderProcess(Process):
             return "Nezināms"
 
     # search for text which is after search string seperated by spaces
-    def find_in_txt_after_space(self, search_string, nr_of_faults_allowed, min_expected_length=-1):
+    def find_in_txt_after_space(self, search_string, nr_of_faults_allowed, min_expected_length=_LENGTH_CHECK_DISABLED):
+        length_check_enabled = True
+        if min_expected_length < 0:
+            length_check_enabled = False
         search_crit = re.compile('(%s){e<=%s}' % (search_string, str(nr_of_faults_allowed)))
-        result_found = False
-        while not result_found:
-            match_obj = re.search(search_crit, self.text)
+        for match_obj in re.finditer(search_crit, self.text):
+            self.debug_print(f"EXAMINING MATCH OBJECT: {search_string}")
             if match_obj != None:
                 # get the string where the searched data starts
                 data_plus_extra = self.text[match_obj.end():]
-                if data_plus_extra[0] == ' ':
-                    # There is a space after the search keyword
-                    # Get string 2 full words with space between them, removing starting space
-                    search_crit_2w = re.compile("^\S*\s+(\S+)")
-                    match_obj = re.search(search_crit_2w, data_plus_extra)
-                    found_data = match_obj.group(0)
-                    # Split string with whitespaces
-                    list_of_strings = re.split("\\s+", found_data)
-                    return list_of_strings[1]
-                else:
-                    # There is no space after the search word, so no need to search for next word after space
-                    # Get text until first space
-                    data_list = re.split("\\s+", data_plus_extra, maxsplit=1)
-                    return data_list[0]
+                if len(data_plus_extra) > 0:
+                    if data_plus_extra[0] == ' ':
+                        # There is a space after the search keyword
+                        # Get string 2 full words with space between them, removing starting space
+                        search_crit_2w = re.compile("^\S*\s+(\S+)")
+                        match_obj = re.search(search_crit_2w, data_plus_extra)
+                        found_data = match_obj.group(0)
+                        # Split string with whitespaces
+                        list_of_strings = re.split("\\s+", found_data)
+                        result = list_of_strings[1]
+                    else:
+                        # There is no space after the search word, so no need to search for next word after space
+                        # Get text until first space
+                        data_list = re.split("\\s+", data_plus_extra, maxsplit=1)
+                        result = data_list[0]
+                    if length_check_enabled:
+                        # Check if found result is at least the min length
+                        if len(result) >= min_expected_length:
+                            # Result length acceptable, return
+                            return result
+                    else:
+                        # Length check not enabled return first found result
+                        return result
                 # self.debug_print("***Printing all matches for data***")
                 # for match_obj_2 in re.finditer(search_crit, self.text):
                 #     data_plus_extra2 = self.text[match_obj_2.end():]
@@ -174,6 +191,9 @@ class ImageDecoderProcess(Process):
                 # self.debug_print("************************************")
             else:
                 self.debug_print("Did not find \"%s\" in check String" % search_string)
+        self.debug_print(f"Did not find search word: {search_string}")
+        return None
+
 
     def search_for_pattern(self, pattern_string, nr_of_faults_allowed):
         search_crit = re.compile('(%s){e<=%s}' % (pattern_string, str(nr_of_faults_allowed)))
