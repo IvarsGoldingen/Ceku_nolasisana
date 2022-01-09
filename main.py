@@ -12,22 +12,33 @@ from datetime import date
 from os.path import exists
 from ScrollFrame import ScrollFrame
 import shutil
+import time
+import logging
+
+# logging
+log_formatter = logging.Formatter('%(asctime)s:%(name)s:%(levelname)s:%(message)s')
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(log_formatter)
+stream_handler.setLevel(logging.INFO)
+logger.addHandler(stream_handler)
+file_handler = logging.FileHandler('main.log')
+file_handler.setFormatter(log_formatter)
+file_handler.setLevel(logging.ERROR)
+logger.addHandler(file_handler)
 
 _entry_size = 30
 _target_picture_size = 1000
-# test
-# TODO: ? Create logic that checks if found store data resembles expected - minimum length maybe
-# implement minimal lenth in function find_in_txt_after_space of ImageDecoder
-# TODO: Improve performance - why is it so long to after pressing start, setting picture on ui in thread?
 # TODO: Test functionality when registering multiple check in a row, CekuWeb.register _check function
-# Date field always has different name  - use regex when searching?
+# TODO: Date field always has different name  - use regex when searching?
+# Create if needed:
 # TODO: ? Add rotate buttons  -so far everything opened fine
 # TODO: ? Radio buttons for store names
 
 
 def main_fc():
     main = MainClass()
-
 
 class MainClass:
     # Size of UI elements
@@ -46,6 +57,7 @@ class MainClass:
         """
         @type self.web: CekuWeb
         """
+        logger.info('Program started')
         # Queue to get data from image process
         self.queue = Queue()
         # Number of checks processed in the background
@@ -68,10 +80,17 @@ class MainClass:
         self.init_empty_UI()
         # determined by radiobutton pressed
         self.phone_number_selected = 1
+        #For timing of check processing
+        self.t1_start = 0.0
+        self.t2_first_check_processed = 0.0
+        self.t3_end = 0.0
+        self.t4_image_set = 0.0
 
     # Create UI
     def init_empty_UI(self):
         self.ui_root = Tk()
+        # When closing the app call the save and finish method
+        self.ui_root.protocol("WM_DELETE_WINDOW", self.save_and_finish)
         self.ui_root.title('Čeku nolasīšana')
         self.prepare_ui_elements()
         self.place_ui_elements()
@@ -79,6 +98,7 @@ class MainClass:
 
     # Set picture of check on UI
     def set_picture(self, image_name):
+        self.scrollable_frame.move_to_start()
         image_location = self.entry_directory_var.get() + "\\" + image_name
         image = Image.open(image_location)
         old_width, old_height = image.size
@@ -86,20 +106,25 @@ class MainClass:
         target_size = int(self._target_picture_size * self.displayed_img_size_coef)
         size_coeficient = target_size / biggest_size
         new_size = (int(old_width * size_coeficient), int(old_height * size_coeficient))
-        print(f'Desired size {new_size[0]} and {new_size[1]}')
         image = image.resize(new_size)
         if old_width > old_height:
             image = image.rotate(270, resample=Image.BICUBIC, expand=True)
         self.image = ImageTk.PhotoImage(image)
         self.img_lbl.configure(image=self.image)
+        self.t4_image_set = time.perf_counter()
+        logger.debug(f"First image set after {self.t4_image_set - self.t1_start}")
 
     def zoom_in(self):
-        self.displayed_img_size_coef += self._zoom_coef
-        self.set_picture(self.check_list[self.current_check_displayed].file_name)
+        if self.check_list:
+            # There should be something to zoom
+            self.displayed_img_size_coef += self._zoom_coef
+            self.set_picture(self.check_list[self.current_check_displayed].file_name)
 
     def zoom_out(self):
-        self.displayed_img_size_coef -= self._zoom_coef
-        self.set_picture(self.check_list[self.current_check_displayed].file_name)
+        if self.check_list:
+            # There should be something to zoom
+            self.displayed_img_size_coef -= self._zoom_coef
+            self.set_picture(self.check_list[self.current_check_displayed].file_name)
 
     def prepare_ui_elements(self):
         # Labels
@@ -151,8 +176,8 @@ class MainClass:
         self.btn_register = Button(self.ui_root, text='REĢISTRĒT', command=self.btn_register_pressed,
                                    padx=10, pady=8, width=15)
         self.btn_settings = Button(self.ui_root, text='IESTATĪJUMI', command=self.btn_settings_pressed)
-        self.btn_save_and_finish = Button(self.ui_root, text='BEIGT', command=self.save_and_finish,
-                                          padx=10, pady=8, width=15)
+        self.btn_open_txt_file = Button(self.ui_root, text='ATVĒRT TEKSTA FAILU', command=self.open_txt_file,
+                                        padx=10, pady=8, width=15)
         self.zoom_btn_frame = Frame(self.ui_root)
         self.btn_zoom_out = Button(self.zoom_btn_frame, text='-', command=self.zoom_out,
                                           padx=5, pady=2, width=15, font=("Courier", 20))
@@ -172,7 +197,12 @@ class MainClass:
         self.scrollable_frame = ScrollFrame(self.main_img_frame)
         self.img_lbl = Label(self.scrollable_frame.viewPort, text="Čeka bilde", anchor=tkinter.CENTER)
 
-
+    # On user button press open text file with text editor
+    def open_txt_file(self):
+        if self.check_list:
+            file_wo_extension = os.path.splitext(self.check_list[self.current_check_displayed].file_name)[0]
+            text_file_name_and_loc = file_wo_extension + ".txt"
+            os.startfile(text_file_name_and_loc)
 
     def place_ui_elements(self):
         ceka_dati_start_row = 3
@@ -205,7 +235,7 @@ class MainClass:
         self.entry_phone_2.grid(row=phone_r_btn_start_row + 2, column=1)
         self.entry_phone_3.grid(row=phone_r_btn_start_row + 3, column=1)
         self.btn_register.grid(row=phone_r_btn_start_row + 4, column=0, columnspan=2)
-        self.btn_save_and_finish.grid(row=phone_r_btn_start_row + 5, column=0, columnspan=2)
+        self.btn_open_txt_file.grid(row=phone_r_btn_start_row + 5, column=0, columnspan=2)
         # right side of app, folder selection and picture of check
         self.lbl_directory.grid(row=0, column=3)
         self.entry_directory.grid(row=0, column=4)
@@ -239,6 +269,7 @@ class MainClass:
         self.entry_pvn_nr_var.set(ceks.pvn_nr)
         self.entry_summa_var.set(ceks.summa)
         self.entry_date_var.set(ceks.datums)
+        self.lbl_title_ceks.config(text=f'Čeka dati - {ceks.file_name}')
 
     # Dirrectory selection button pressed
     def dir_btn_pressed(self):
@@ -250,11 +281,8 @@ class MainClass:
     def btn_register_pressed(self):
         self.get_data_from_in_fields()
         phone_nr = self.get_phone_nr_from_radio_btns()
-        # delete list contents
-        print("Registret pressed")
-        # self.web = CekuWeb('https://cekuloterija.lv/')
         if self.web == None:
-            print("self.web object does not exist, creating")
+            logger.info("self.web object does not exist, creating")
             self.web = CekuWeb()
         self.web.register_check(self.check_to_register, phone_nr)
 
@@ -262,7 +290,6 @@ class MainClass:
     Before opening web, read input fields with any changes that the user might have done
     @type self.check: Ceks
     """
-
     def get_data_from_in_fields(self):
         try:
             self.check_to_register.ceka_nr = self.entry_ceka_nr_var.get()
@@ -271,7 +298,7 @@ class MainClass:
             self.check_to_register.summa = self.entry_summa_var.get()
             self.check_to_register.datums = self.entry_date_var.get()
         except Exception as e:
-            print(e)
+            logging.exception("message")
             self.show_message('Nav aizpildīti visi lauki')
 
     def get_phone_nr_from_radio_btns(self):
@@ -289,6 +316,7 @@ class MainClass:
     def btn_start_pressed(self):
         self.displayed_img_size_coef = 1.0
         if not self.processing_check_data:
+            logger.info("Searching for image files in folder:")
             self.set_statuss('Meklē čekus mapē', "Green")
             self.processing_check_data = True
             # delete list contents
@@ -300,19 +328,32 @@ class MainClass:
             for file in allowed_types:
                 self.check_image_list.extend(glob.glob(file))
             for image in self.check_image_list:
-                print(image)
+                logger.info(f'Found file name: {image}')
             self.current_check_displayed = 0
-            self.process_check_new()
+            self.t1_start = time.perf_counter()
+            self.process_first_check()
         else:
             self.show_message("Apstrādā iepriekšējos čekus")
 
-    # Start bachround processed for check reading
-    def process_check_new(self):
-        # Regullary look if new checks are ariving from the background process
-        self.ui_root.after(self._check_processing_dreq_ms, self.check_results_from_image_process)
+    def process_first_check(self):
         if self.check_image_list:
             # List not empty, star processing checks
-            for file_name in self.check_image_list:
+            # Regullary look if new checks are ariving from the background process
+            self.ui_root.after(self._check_processing_dreq_ms, self.check_results_from_image_process)
+            process = ImageDecoderProcess(self.queue, self.setting.check_location, self.check_image_list[0])
+            process.start()
+        else:
+            self.processing_check_data = False
+            self.set_statuss("Mapē nav čeku", "Red")
+
+    # Start bachround processed for check reading
+    def process_checks(self):
+        if self.check_image_list:
+            # List not empty, star processing checks
+            # Regullary look if new checks are ariving from the background process
+            self.ui_root.after(self._check_processing_dreq_ms, self.check_results_from_image_process)
+            for file_name in self.check_image_list[1:]:
+                # Start from second check since the first one was processed before
                 process = ImageDecoderProcess(self.queue, self.setting.check_location, file_name)
                 process.start()
         else:
@@ -324,16 +365,21 @@ class MainClass:
     # background process
     """
     def check_results_from_image_process(self):
-        print("Checking results")
+        logger.info("Checking results from image process")
+        # When first check is processed function called to do the rest if them
+        first_check_processed = False
         try:
             while not self.queue.empty():
                 processed_check = self.queue.get(timeout=0.05)
                 self.check_list.append(processed_check)
                 self.checks_processed += 1
-                print(f'Got check {self.checks_processed} of {len(self.check_image_list)} '
-                      f'\nFile name:' + processed_check.file_name)
+                logger.info(f'Got check {self.checks_processed} of {len(self.check_image_list)} '
+                      f'\n\tFile name:' + processed_check.file_name)
                 self.set_statuss(f'Nolasīti {self.checks_processed} no {len(self.check_image_list)} čekiem', 'Green')
                 if self.checks_processed == 1:
+                    first_check_processed = True
+                    self.t2_first_check_processed = time.perf_counter()
+                    logger.info(f"First check read in: {self.t2_first_check_processed - self.t1_start}")
                     # if first check set it on UI
                     self.place_check_data(processed_check)
                     self.check_to_register = processed_check
@@ -342,34 +388,41 @@ class MainClass:
                         len(self.check_image_list))
                     self.picture_opened_statuss.config(text=status_text)
         except Exception as e:
-            print("No results yet, waiting again")
+            logger.info("No results yet, waiting again")
         if self.checks_processed < len(self.check_image_list):
-            self.ui_root.after(self._check_processing_dreq_ms, self.check_results_from_image_process)
+            if not first_check_processed:
+                self.ui_root.after(self._check_processing_dreq_ms, self.check_results_from_image_process)
+            else:
+                self.process_checks()
         else:
             self.processing_check_data = False
             self.set_statuss(f'Visi čeki apstrādāti', 'Green')
+            self.t3_end = time.perf_counter()
+            logger.info(f"All checks read in: {self.t3_end - self.t1_start}")
 
     # Open next check in UI
     def btn_next_pressed(self):
-        self.displayed_img_size_coef = 1.0
-        if not self.processing_check_data:
-            self.current_check_displayed += 1
-            if self.current_check_displayed >= len(self.check_image_list):
-                self.current_check_displayed = 0
-            self.set_ui_with_current_check()
-        else:
-            self.show_message("Apstrādā čekus, nevar pārslēgties")
+        if self.check_list:
+            self.displayed_img_size_coef = 1.0
+            if not self.processing_check_data:
+                self.current_check_displayed += 1
+                if self.current_check_displayed >= len(self.check_image_list):
+                    self.current_check_displayed = 0
+                self.set_ui_with_current_check()
+            else:
+                self.show_message("Apstrādā čekus, nevar pārslēgties")
 
     # Open previous check in UI
     def btn_prev_pressed(self):
-        self.displayed_img_size_coef = 1.0
-        if not self.processing_check_data:
-            self.current_check_displayed -= 1
-            if self.current_check_displayed < 0:
-                self.current_check_displayed = len(self.check_image_list) - 1
-            self.set_ui_with_current_check()
-        else:
-            self.show_message("Apstrādā čekus, nevar pārslēgties")
+        if self.check_list:
+            self.displayed_img_size_coef = 1.0
+            if not self.processing_check_data:
+                self.current_check_displayed -= 1
+                if self.current_check_displayed < 0:
+                    self.current_check_displayed = len(self.check_image_list) - 1
+                self.set_ui_with_current_check()
+            else:
+                self.show_message("Apstrādā čekus, nevar pārslēgties")
 
     def set_ui_with_current_check(self):
         status_text = "Rāda " + str(self.current_check_displayed + 1) + " no " + str(len(self.check_image_list))
@@ -433,19 +486,27 @@ class MainClass:
         self.status_lbl.config(text=text, bg=color)
 
     """
-    When user closes the app by pressing the end button:
+    When user closes the app
     Move all checks and text files to new folder
     """
     def save_and_finish(self):
         if (len(self.check_image_list) > 0):
-            # Create folder with todays date
-            today = date.today()
-            date_str = today.strftime("%Y_%m_%d")
-            final_folder_loc = self.create_folder(self.setting.check_location + "\\" + date_str)
-            self.move_all_check_files_to_archive(final_folder_loc)
+            # There are files opened, ask the user if they shoul be moved
+            result = messagebox.askyesnocancel("Beigt darbu", "Pārvietot failus?", icon='question')
+            if result is not None:
+                # User did not cancel
+                if result:
+                    # User pressed yes on move files promt
+                    if (len(self.check_image_list) > 0):
+                        # Create folder with todays date
+                        today = date.today()
+                        date_str = today.strftime("%Y_%m_%d")
+                        final_folder_loc = self.create_folder(self.setting.check_location + "\\" + date_str)
+                        self.move_all_check_files_to_archive(final_folder_loc)
+                self.ui_root.destroy()
         else:
-            print("No files to move exiting app")
-        self.ui_root.destroy()
+            # No files to move, just close
+            self.ui_root.destroy()
 
     # Done on end of work with app
     def move_all_check_files_to_archive(self, new_path):
@@ -462,11 +523,10 @@ class MainClass:
         if file_exists:
             shutil.move(current_path, new_path)
         else:
-            print("File " + current_path + " does not exist")
+            logger.error("File " + current_path + " does not exist")
 
     def create_folder(self, path):
         if os.path.exists(path):
-            print("Folder exists:\r")
             number = 1
             while os.path.exists(path + "_" + str(number)):
                 number += 1
@@ -474,7 +534,6 @@ class MainClass:
             os.mkdir(final_folder_name)
             return final_folder_name
         else:
-            print("Folder does not exist, creating")
             os.mkdir(path)
             return path
 

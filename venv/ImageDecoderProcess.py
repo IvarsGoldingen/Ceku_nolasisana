@@ -6,6 +6,20 @@ import regex as re
 from Ceks import Ceks
 from Simple_date import SimpleDate
 from multiprocessing import Process, Queue
+import logging
+
+# logging
+log_formatter = logging.Formatter('%(asctime)s:%(name)s:%(levelname)s:%(message)s')
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(log_formatter)
+stream_handler.setLevel(logging.INFO)
+logger.addHandler(stream_handler)
+file_handler = logging.FileHandler('image_decoder.log')
+file_handler.setFormatter(log_formatter)
+file_handler.setLevel(logging.ERROR)
+logger.addHandler(file_handler)
 
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
@@ -17,7 +31,6 @@ class ImageDecoderProcess(Process):
     _resize_factor = 0.5
     _LENGTH_CHECK_DISABLED = -1
     text = ""
-    debug_print_enable = True
     # List of stores first being name second PVN code
     _store_list = [("MAXIMA", "LV40003520643"),
                    ("RIMI", "LV40003053029"),
@@ -44,13 +57,14 @@ class ImageDecoderProcess(Process):
                         ('PVN maksātāja kods', 8, 10),
                         ('PVN Nr.', 1, 10),
                         ('PVN ', 1, 10)]
-    _SUM_KEYWORDS = [('KOPĀ', 1, 3),
+    _SUM_KEYWORDS = [('KOPĀ:', 1, 3),
                      ('Samaksai EUR', 1, 3),
                      ('Summa:', 1, 3),
                      ('Kopā apmaksai', 5, 3),
                      ('KARTE', 1, 3),
                      ('KOPĀ EUR', 1, 3),
-                     ('SAMAKSA', 1, 3)]
+                     ('SAMAKSA', 1, 3),
+                     ('KOPĀ', 1, 3)]
 
     def __init__(self, queue, image_location, image_name):
         Process.__init__(self)
@@ -59,14 +73,9 @@ class ImageDecoderProcess(Process):
         self.image_location = image_location
         self.image_name = image_name
 
-
     def run(self):
         ceks = self.get_check_data(self.image_location, self.image_name)
         self.queue.put(ceks)
-
-    def debug_print(self, string):
-        if self.debug_print_enable:
-            print(string)
 
     # Get data from check imaeg to create check object
     def get_check_data(self, image_location, image_name):
@@ -74,7 +83,6 @@ class ImageDecoderProcess(Process):
         self.img = cv2.imread(full_name)
         self.adjust_image()
         self.get_image_text(full_name)
-        # self.print_text()
         store_nr = self.determine_store()
         if store_nr < 100:
             # If store number smaller than 100, it is known, set PVN nr.
@@ -103,7 +111,7 @@ class ImageDecoderProcess(Process):
 
     def get_date(self):
         date_string = self.search_for_pattern('(20)\d\d[- /.](0[1-9]|1[012])[- /.](0[1-9]|[12][0-9]|3[01])', 2)
-        self.debug_print(date_string)
+        logger.info(f'Found date: {date_string}')
         # Remove all text before 2 so only useful date gets left
         better_string = re.sub(r'^.*?2', '2', date_string)
         return better_string
@@ -112,26 +120,26 @@ class ImageDecoderProcess(Process):
         result = None
         nr_found = False
         if veikals_nr < 100:
-            self.debug_print("Known store, searching for specific keyword:" +
+            logger.info("Known store, searching for specific keyword:" +
                              keyword_list[veikals_nr][0])
             # Known store, search only specific string
             result = self.find_in_txt_after_space(keyword_list[veikals_nr][0],
                                                   keyword_list[veikals_nr][1],
                                                   keyword_list[veikals_nr][2])
-            self.debug_print(result)
+            logger.info(f'Found: {result}')
         if result == None:
-            self.debug_print("Did not find data by specific keyword")
+            logger.info("Did not find data by specific keyword, using all keywords")
             # Store not known or did not find with specifc search keyword
             # Loop through all of the search words
             for nr, search_word_tpl in enumerate(keyword_list):
-                self.debug_print(str(nr))
                 if nr != veikals_nr:
                     # Do not check the keyword already used with known store
-                    self.debug_print("Using: " + search_word_tpl[0])
+                    logger.info("Searching for: " + search_word_tpl[0])
                     result = self.find_in_txt_after_space(search_word_tpl[0],
                                                           search_word_tpl[1],
                                                           search_word_tpl[2])
                     if result != None:
+                        logger.info(f'Found {result}')
                         break
         if result != None:
             better_result = self.remove_new_line_chars(result)
@@ -146,7 +154,7 @@ class ImageDecoderProcess(Process):
             length_check_enabled = False
         search_crit = re.compile('(%s){e<=%s}' % (search_string, str(nr_of_faults_allowed)))
         for match_obj in re.finditer(search_crit, self.text):
-            self.debug_print(f"EXAMINING MATCH OBJECT: {search_string}")
+            logger.info(f"EXAMINING MATCH OBJECT: {search_string}")
             if match_obj != None:
                 # get the string where the searched data starts
                 data_plus_extra = self.text[match_obj.end():]
@@ -173,25 +181,7 @@ class ImageDecoderProcess(Process):
                     else:
                         # Length check not enabled return first found result
                         return result
-                # self.debug_print("***Printing all matches for data***")
-                # for match_obj_2 in re.finditer(search_crit, self.text):
-                #     data_plus_extra2 = self.text[match_obj_2.end():]
-                #     if data_plus_extra2[0] == ' ':
-                #         self.debug_print("There is a space after the search keyword")
-                #         search_crit_2w2 = re.compile("^\S*\s+(\S+)")
-                #         match_obj_3 = re.search(search_crit_2w2, data_plus_extra2)
-                #         if match_obj_3 != None:
-                #             data = match_obj_3.group(0)
-                #             data_list = re.split("\\s+", data)
-                #             self.debug_print(data_list[1])
-                #     else:
-                #         self.debug_print("NO space after the search keyword")
-                #         data_list = re.split("\\s+", data_plus_extra2, maxsplit=1)
-                #         self.debug_print(data_list[0])
-                # self.debug_print("************************************")
-            else:
-                self.debug_print("Did not find \"%s\" in check String" % search_string)
-        self.debug_print(f"Did not find search word: {search_string}")
+        logger.info(f"Did not find search word: {search_string}")
         return None
 
 
@@ -199,11 +189,11 @@ class ImageDecoderProcess(Process):
         search_crit = re.compile('(%s){e<=%s}' % (pattern_string, str(nr_of_faults_allowed)))
         match_obj = re.search(search_crit, self.text)
         if (match_obj != None):
-            self.debug_print("Found pattern")
+            logger.info("Found pattern")
             found_pattern = match_obj.group(0)
             return found_pattern
         else:
-            self.debug_print("Did not find pattern")
+            logger.warning("Did not find pattern")
             return None
 
     def remove_new_line_chars(self, string):
@@ -222,14 +212,14 @@ class ImageDecoderProcess(Process):
     Returns store number if it isrecognised by the app, else returns unknown constant
     """
     def determine_store(self):
-        self.debug_print("Determening store")
+        logger.info("Determening store")
         for nr, item in enumerate(self._store_list):
             # Loop through stores that we know  and check if check from tht store
-            self.debug_print("Checking if store is " + item[0])
+            logger.info("Checking if store is " + item[0])
             if self.check_if_exists_in_text(item[0], 1):
                 # Found store name in check return it
                 # Return store number
-                self.debug_print("Store is " + item[0])
+                logger.info("Store is " + item[0])
                 return nr
         return self._UNKNOWN_NR
 
@@ -249,12 +239,12 @@ class ImageDecoderProcess(Process):
         file_exists = exists(pic_text_f_name)
         if (file_exists):
             # text file already created for this picture
-            self.debug_print("Text file exists reading that")
+            logger.info("Text file exists reading that")
             with open(pic_text_f_name, encoding="utf8") as f:
                 temp_text = f.readlines()
             self.text = str(temp_text)
         else:
-            self.debug_print("Text file does not exists")
+            logger.info("Text file does not exists, creating")
             # crete text from image and save
             self.text = pytesseract.image_to_string(self.img, lang="lav")
             self.create_text_file(pic_text_f_name)

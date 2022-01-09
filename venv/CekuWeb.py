@@ -13,6 +13,20 @@ import os
 import os.path
 import shutil
 import sys
+import logging
+
+# logging
+log_formatter = logging.Formatter('%(asctime)s:%(name)s:%(levelname)s:%(message)s')
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(log_formatter)
+stream_handler.setLevel(logging.INFO)
+logger.addHandler(stream_handler)
+file_handler = logging.FileHandler('ceku_web.log')
+file_handler.setFormatter(log_formatter)
+file_handler.setLevel(logging.ERROR)
+logger.addHandler(file_handler)
 
 # Class for interracting with the check lottery web page
 class CekuWeb:
@@ -65,7 +79,7 @@ class CekuWeb:
         # Check if chrome driver opened already,
         # By default the URL whn nothing opened is "data:,"
         if len(self.driver.current_url) < 10:
-            print("Web driver opened for the first time, open the webpage and start from beginning")
+            logger.info("Web driver opened for the first time, open the webpage and start from beginning")
             self.open_first_time()
         elif self.driver.current_url == 'https://cekuloterija.lv/':
             # Check if we finished registering the previous check in which case press the next check button
@@ -85,6 +99,7 @@ class CekuWeb:
         try:
             self.driver.find_element_by_xpath(xpath)
         except NoSuchElementException:
+            logging.exception("message")
             return False
         return True
 
@@ -117,11 +132,10 @@ class CekuWeb:
             split_date_string = date_string.split(sep=splitting_char, maxsplit=3)
             date_obj = SimpleDate(split_date_string[0], split_date_string[1], split_date_string[2])
             date_with_dot = date_string.replace(splitting_char, '.')
-            print(date_with_dot)
+            logger.info(f'Found date: {date_with_dot}')
         else:
-            print("Did not find splitting char")
-        # MuiPickersSlideTransition-transitionContainer MuiPickersCalendarHeader-transitionContainer
-        # TODO: this cahnges its name
+            logger.error("Did not find splitting char when trying to input date")
+        # TODO: this cahnges its name for every new check registered - better way of handling this?
         acceptable_el_names = ["//div[@class='MuiInputBase-root MuiOutlinedInput-root jss36 jss40 MuiInputBase-fullWidth "
                 "MuiInputBase-formControl MuiInputBase-adornedEnd MuiOutlinedInput-adornedEnd']",
                                "//div[@class='MuiInputBase-root MuiOutlinedInput-root jss107 jss111 MuiInputBase-fullWidth "
@@ -134,9 +148,6 @@ class CekuWeb:
         cntr = 0
         while not found_date_field:
             try:
-                # date_field = self.driver.find_element_by_xpath(
-                #     "//div[@class='MuiInputBase-root MuiOutlinedInput-root jss36 jss40 MuiInputBase-fullWidth "
-                #     "MuiInputBase-formControl MuiInputBase-adornedEnd MuiOutlinedInput-adornedEnd']")
                 date_field = self.driver.find_element_by_xpath(acceptable_el_names[cntr])
                 found_date_field = True
             except selenium.common.exceptions.NoSuchElementException as e:
@@ -169,20 +180,15 @@ class CekuWeb:
         @type date_obj: SimpleDate
         """
         # Month in web written like: "Novembris 2021"
-        print('Web month name: ' + date_str_web)
+        logger.info(f'Month named in web: {date_str_web}')
         month_name = self._month_names[date_obj.month - 1]
         date_str_current = month_name + ' ' + str(date_obj.year)
         if date_str_current == date_str_web:
-            print("Correct month opened")
+            logger.debug("Correct month opened")
             return True
         else:
-            print("Incorret month selected")
+            logger.debug("Incorret month selected")
             return False
-
-
-
-
-
 
 """
 Selenieum notes

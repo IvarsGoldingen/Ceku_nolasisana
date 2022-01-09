@@ -60,3 +60,8 @@ class ScrollFrame(tk.Frame):
             self.canvas.unbind_all("<Button-5>")
         else:
             self.canvas.unbind_all("<MouseWheel>")
+
+    # Scroll to top left
+    def move_to_start(self):
+        self.canvas.yview_moveto(0)
+        self.canvas.xview_moveto(0)
